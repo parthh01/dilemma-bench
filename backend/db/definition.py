@@ -34,6 +34,8 @@ class Matches(Base):
     id = Column(UUID, primary_key=True, default=uuid.uuid4)
     agent1_id = Column(UUID, ForeignKey("agents.id"), nullable=False)
     agent2_id = Column(UUID, ForeignKey("agents.id"), nullable=False)
+    agent1_default = Column(Boolean, nullable=False, default=False)
+    agent2_default = Column(Boolean, nullable=False, default=False)
     result = Column(Integer, nullable=False) # 0: draw, 1: agent1 wins, 2: agent2 wins
     created_at = Column(DateTime, nullable=False, default=datetime.now)
 
