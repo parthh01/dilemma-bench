@@ -1,0 +1,10 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# dilemma-bench
+
+## Overview
+
+**dilemma-bench** is a project implementing a benchmark for evaluating large language models (LLMs) and human players through structured language-based social dilemmas. The core experiment is a one-shot, dialogue-constrained **Prisoner’s Dilemma**, where agents (human or model) negotiate entirely via natural language and independently decide whether to cooperate or defect based on their interpretation of the other participant’s intent.
