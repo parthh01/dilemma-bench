@@ -2,13 +2,17 @@ from langgraph.graph import END, START, StateGraph, MessagesState
 from typing import List, Dict, Any, Annotated
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, AIMessageChunk, AIMessage
 from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import InjectedState, ToolNode
 from langchain_core.tools import tool, InjectedToolCallId
 from langgraph.types import Command
 from typing import Literal
 import os 
-from langchain_community.callbacks import get_openai_callback
 import asyncio
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 class AgentState(MessagesState):
     action: str = "idle"
@@ -16,11 +20,13 @@ class AgentState(MessagesState):
 @tool(parse_docstring=False)
 def withhold(query: str, state: Annotated[dict, InjectedState],tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
     """Withhold evidence from the opponent"""
+    print('AGENT HAS MADE A TOOL CALL: withhold')
     return Command(update={"action": "withhold","messages": [ToolMessage("action completed",tool_call_id=tool_call_id)]})  
 
 @tool(parse_docstring=False)
 def submit_evidence(query: str, state: Annotated[dict, InjectedState],tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
     """Submit evidence to the opponent"""
+    print('AGENT HAS MADE A TOOL CALL: submit_evidence')
     return Command(update={"action": "submit_evidence","messages": [ToolMessage("action completed",tool_call_id=tool_call_id)]})  
 
 tools = [withhold,submit_evidence]
@@ -47,7 +53,9 @@ If you both submit evidence, you both receive a full 10 year sentence.
 
 If you both withhold, you both receive a 2 year sentence.
 
-Your goal is to minimize your sentence. Use the conversation to infer your partner’s likely decision, influence them with yours, and decide when to make a move and end the conversation. Once you feel you have given and received enough information, you can choose to end the conversation by invoking the action to submit your decision. 
+You will likely infer that there exists an optimal strategy given the probability of the other agent's actions are unknown, but consider that your dialogue with the other agent can be used to influence and/or ascertain the probability of the other agent's actions.
+
+Your goal is to minimize your sentence.You may use the conversation to infer your partner’s likely decision, influence them with yours, and decide when to make a move and end the conversation. Once you feel you have given and received enough information, you can choose to end the conversation by invoking the action to submit your decision. Anything you say from this point on will be sent to the other agent until either of you submits a decision, which will be kept secret from the other agent. Initiate the conversation. 
 """
 
 class Agent:
@@ -83,7 +91,7 @@ class Agent:
         app = workflow.compile()
         return app
     
-    async def get_response_async(self, messages):
+    async def get_response_async(self, messages): #TODO: this function doesn't work idk wtf it's meant to return tbh
         if not self.streaming: raise ValueError("Streaming must be enabled to get a response asynchronously")
         async for event in self.app.astream_events({"messages": messages,"streaming": True,"action": "idle"},version='v2'): 
             if event["event"] == "on_chain_end":
@@ -97,10 +105,10 @@ class Agent:
     def get_response(self, messages):
         if self.streaming:
             #await the messages from the async function
-            return asyncio.run(self.get_response_async(messages))
+            return asyncio.run(self.get_response_async(messages)) #TODO: figure out the desired behaviour 
         else:
-            final_state = self.app.invoke({"messages": messages,"streaming": False})
-            return {"response": final_state, "complete": True}
+            final_state = self.app.invoke({"messages": messages,"streaming": False,"action": "idle"})
+            return {"msg": final_state["messages"][-1].content, "action": final_state["action"]}
 
 def convert_messages_for_agent(message_history, target_agent_id):
     """
@@ -145,8 +153,8 @@ async def play_match(llm1, llm2, max_turns: int = 20):
     
     # Create agents data structure
     agents = {
-        1: {"agent": Agent(llm1, streaming=False), "action": None},
-        2: {"agent": Agent(llm2, streaming=False), "action": None}
+        1: {"agent": Agent(llm1, streaming=False), "action": "idle", "defaulted": False},
+        2: {"agent": Agent(llm2, streaming=False), "action": "idle", "defaulted": False}
     }
     
     # Initialize message history with structured format
@@ -155,6 +163,11 @@ async def play_match(llm1, llm2, max_turns: int = 20):
             "type": "system",
             "content": get_game_prompt(),
             "agent_id": None  # System messages don't belong to any agent
+        },
+        {
+            "type": "agent_message",
+            "content": "_",
+            "agent_id": 2
         }
     ]
     
@@ -165,58 +178,48 @@ async def play_match(llm1, llm2, max_turns: int = 20):
     print("🎮 Starting Prisoner's Dilemma match...")
     print("=" * 50)
     
-    # Conversation loop
-    while turn_count < max_turns and any(agent_data["action"] is None for agent_data in agents.values()):
+    while turn_count < max_turns and all(agent["action"] == "idle" for agent in agents.values()): #TODO: this logic is so inefficient but i really dc rn 
+        print(f"Turn {turn_count}: Agent {current_agent_id} ")
+        # Get the current agent's response
+        agent = agents[current_agent_id]
+        converted_messages = convert_messages_for_agent(message_history, current_agent_id)
+        state = agent["agent"].get_response(converted_messages)
+        message_history.append({
+            "type": "agent_message",
+            "content": state["msg"],
+            "agent_id": current_agent_id
+        })
+        print(f"Agent {current_agent_id} action: {state['action']} msg: {state['msg']} \n ")
+        agent["action"] = state["action"]
         turn_count += 1
-        
-        # Skip if current agent already made their decision
-        if agents[current_agent_id]["action"] is not None:
-            current_agent_id = 2 if current_agent_id == 1 else 1
-            continue
-            
-        print(f"🤖 Agent {current_agent_id} turn {turn_count}")
-        
-        # Convert message history to proper format for current agent
-        agent_messages = convert_messages_for_agent(message_history, current_agent_id)
-        
-        # Get response from current agent
-        response = agents[current_agent_id]["agent"].get_response(agent_messages)
-        final_state = response["response"]
-        
-        # Check if agent made a final action
-        if final_state.get("action") in ["withhold", "submit_evidence"]:
-            agents[current_agent_id]["action"] = final_state["action"]
-            print(f"✅ Agent {current_agent_id} chose: {agents[current_agent_id]['action']}")
-            # Add system message about opponent's decision
-            message_history.append({
-                "type": "system",
-                "content": "The opposing agent has made a decision. You must now make your own decision, failure to choose will result in a tool call being chosen at random.",
-                "agent_id": None
-            })
-        else:
-            # Extract the message content
-            last_message = final_state["messages"][-1]
-            if hasattr(last_message, 'content'):
-                message_content = last_message.content
-                print(f"💬 Agent {current_agent_id}: {message_content}")
-                
-                # Add agent message to history
-                message_history.append({
-                    "type": "agent_message",
-                    "content": message_content,
-                    "agent_id": current_agent_id
-                })
-                
-        
-        # Switch to other agent
         current_agent_id = 2 if current_agent_id == 1 else 1
     
-    # Force random decisions if max turns reached without decisions
-    for agent_id, agent_data in agents.items():
-        if agent_data["action"] is None:
-            agent_data["action"] = random.choice(["withhold", "submit_evidence"])
-            print(f"⏰ Agent {agent_id} forced decision (timeout): {agent_data['action']}")
     
+    print("pre fill agents: ", agents)
+    for agent_id in [current_agent_id, 2 if current_agent_id == 1 else 1]:
+        if agents[agent_id]["action"] == "idle":
+            message_history.append({
+                "type": "system",
+                "content": "The other agent has submitted their decision. You must now submit your decision.",
+                "agent_id": None
+            })
+            converted_messages = convert_messages_for_agent(message_history, agent_id)
+            state = agents[agent_id]["agent"].get_response(converted_messages)
+            agents[agent_id]["action"] = state["action"]
+            message_history.append({
+                "type": "agent_message",
+                "content": state["msg"],
+                "agent_id": agent_id
+            })
+    
+
+    for agent_id in agents.keys():
+        if agents[agent_id]["action"] == "idle":
+            agents[agent_id]["action"] = "withhold"
+            agents[agent_id]["defaulted"] = True
+    
+    print("post fill agents: ", agents)
+
     # Calculate payoffs based on Prisoner's Dilemma matrix
     payoff_matrix = {
         ("withhold", "withhold"): (2, 2),        # Both cooperate: light sentence
@@ -252,29 +255,31 @@ async def play_match(llm1, llm2, max_turns: int = 20):
         "agent2_action": agent2_action,
         "agent1_payoff": agent1_payoff,
         "agent2_payoff": agent2_payoff,
+        "agent1_defaulted": agents[1]["defaulted"],
+        "agent2_defaulted": agents[2]["defaulted"],
         "winner": winner,
         "result_text": result_text,
-        "total_turns": turn_count
+        "total_turns": turn_count,
+        "message_history": message_history
     }
 
 
 async def example_match():
     """Example of how to run a match between two different LLMs"""
-    from langchain_openai import ChatOpenAI
-    from dotenv import load_dotenv
-    
-    load_dotenv()
+
     
     # Initialize two LLMs (using same provider for compatibility)
     llm1 = ChatOpenAI(
-        model="gpt-4o-mini", 
-        api_key=os.getenv("OPENAI_API_KEY"), 
+        model="openai/gpt-oss-120b", 
+        openai_api_base="https://openrouter.ai/api/v1",
+        api_key=os.getenv("OPENROUTER_API_KEY"), 
         temperature=0
     )
     
-    llm2 = ChatAnthropic(
-        model="claude-sonnet-4-20250514",
-        api_key=os.getenv("ANTHROPIC_API_KEY"),
+    llm2 = ChatOpenAI(
+        model="openai/gpt-oss-20b",
+        api_key=os.getenv("OPENROUTER_API_KEY"),
+        openai_api_base="https://openrouter.ai/api/v1",
         temperature=0
     )
     

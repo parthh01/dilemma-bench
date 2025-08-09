@@ -1,2 +1,6 @@
 **/.venv
 **/.env
+**/*.log
+**/*.pyc
+frontend/cache
+backend/analysis/output

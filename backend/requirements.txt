@@ -6,8 +6,13 @@ uvicorn==0.34.0
 pydantic-settings==2.8.1
 pyjwt[crypto]==2.10.1
 python-dotenv
-langchain-openai==0.3.8
+langchain-openai==0.3.26
 langchain-anthropic==0.3.9
-langchain-core==0.3.43
+langchain-core
 langgraph==0.3.5
 langchain-community==0.3.19
+requests==2.32.3
+slowapi==0.1.9
+petname==2.6
+matplotlib
+seaborn

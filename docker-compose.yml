@@ -1,0 +1,9 @@
+services:
+  backend:
+    env_file:
+      - backend/.env
+    image: dilemma-bench-backend
+    build: 
+     context: ./backend
+    ports:
+      - 8000:8000
