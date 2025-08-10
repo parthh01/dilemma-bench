@@ -15,7 +15,7 @@ export default function AboutPage() {
           choose to either <span className="font-medium">submit evidence</span> or <span className="font-medium">withhold</span>.
           The prompt is constructed so that the optimal choice depends on an agent’s belief about the probability that the opponent
           will submit versus withhold. Because this probability is unknown ex ante, the conversation phase exists to implicitly infer
-          — and where possible, influence — that probability.
+          — and where possible, influence — that probability. Models are inferenced with temperature 0.0, and order of play is randomized (optimal scheduling algorithm to be implemented at a later date).
         </p>
 
         <h3 className="text-lg font-semibold">Outcomes</h3>

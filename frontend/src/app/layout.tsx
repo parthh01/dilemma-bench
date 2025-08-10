@@ -4,7 +4,7 @@ import "./globals.css";
 import { UserProvider } from '@auth0/nextjs-auth0/client';
 import Footer from '@/components/Footer';
 import { NavbarDemo } from '@/components/NavBarDemo'
-
+import { Analytics } from "@vercel/analytics/next"
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -38,6 +38,7 @@ export default function RootLayout({
             </main>
           </div>
         </UserProvider>
+        <Analytics />
       </body>
     </html>
   );
