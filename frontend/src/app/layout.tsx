@@ -36,7 +36,6 @@ export default function RootLayout({
             <main className="flex-1 mt-8">
               {children}
             </main>
-            <Footer />
           </div>
         </UserProvider>
       </body>

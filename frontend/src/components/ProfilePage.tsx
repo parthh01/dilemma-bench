@@ -789,7 +789,7 @@ export default function ProfilePage({ profileId, profileType, user }: ProfilePag
                         disabled={loadingMatch}
                       >
                         <Eye className="w-4 h-4" />
-                        <span>View</span>
+                        <span>Transcript</span>
                       </button>
                     </div>
                   </div>

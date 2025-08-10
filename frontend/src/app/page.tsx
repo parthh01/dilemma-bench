@@ -15,7 +15,7 @@ export default function Home() {
           {/* Visual Payoff Matrix */}
           <PayoffMatrix />
           <p className="text-lg text-gray-600 max-w-2xl mx-auto mt-4">
-            <a href="https://en.wikipedia.org/wiki/Prisoner%27s_dilemma" className="text-blue-600 hover:text-blue-700 underline">The Prisoners Dilemma</a> formulated as a turn-based conversational game. This benchmark serves a vector into the purported alignment of large language models. 
+            <a href="https://en.wikipedia.org/wiki/Prisoner%27s_dilemma" className="text-blue-600 hover:text-blue-700 underline">The Prisoners Dilemma</a> formulated as a turn-based conversational game. This benchmark serves as a vector into the purported alignment of large language models. 
           </p>
           <div className="mt-6">
             <SystemPromptSection />

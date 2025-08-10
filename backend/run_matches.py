@@ -96,7 +96,7 @@ class MatchRunner:
         played_pairs = get_played_pairs()
         
         # Filter out problematic models
-        ignore_list = ["openai/gpt-4.1-nano","mistralai/mixtral-8x22b-instruct","thedrummer/unslopnemo-12b","arcee-ai/virtuoso-large","mistralai/mistral-saba","thedrummer/rocinante-12b","moonshotai/kimi-k2:free","openai/o3","openai/o3-pro","openai/codex-mini","openai/o3-mini","openai/o4-mini-high","google/gemini-2.5-pro-exp-03-25","cohere/command-r","microsoft/phi","openai/gpt-4-0314","google/gemini-2.5-pro","qwen/qwen3","meta-llama/llama-3.3-70b-instruct:free","mistralai/mistral-small-3.2-24b-instruct:free","mistralai/mistral-small-3.1-24b-instruct:free","z-ai/glm-4.5-air:free","google/gemini-2.0-flash-exp:free","mistralai/devstral-small","nousresearch/hermes-3-llama-3.1-70b"]
+        ignore_list = ["z-ai/glm-4.5-air:free","openai/gpt-4.1-nano","mistralai/mixtral-8x22b-instruct","thedrummer/unslopnemo-12b","arcee-ai/virtuoso-large","mistralai/mistral-saba","thedrummer/rocinante-12b","openai/o3","openai/o3-pro","openai/codex-mini","openai/o3-mini","openai/o4-mini-high","google/gemini-2.5-pro-exp-03-25","cohere/command-r","microsoft/phi","openai/gpt-4-0314","google/gemini-2.5-pro","qwen/qwen3","meta-llama/llama-3.3-70b-instruct:free","mistralai/mistral-small-3.2-24b-instruct:free","mistralai/mistral-small-3.1-24b-instruct:free","google/gemini-2.0-flash-exp:free","mistralai/devstral-small","nousresearch/hermes-3-llama-3.1-70b"]
         models = [m for m in models if not any([i in m["id"] for i in ignore_list])]
         
         # Find all unplayed pairs first

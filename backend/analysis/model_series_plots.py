@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Dict, List, Tuple
+from sqlalchemy import func
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -309,16 +310,16 @@ def agents_correlation_elo_vs_submit(ctx: AnalysisContext) -> plt.Figure:
     ax.scatter(xs_submit_pct, ys_elo, s=28, color=sns.color_palette("colorblind")[0], alpha=0.45, edgecolor="none")
 
     # Best-fit line (least squares)
-    if len(xs_submit_pct) >= 2:
-        x_mean = sum(xs_submit_pct) / len(xs_submit_pct)
-        y_mean = sum(ys_elo) / len(ys_elo)
-        s_xy = sum((x - x_mean) * (y - y_mean) for x, y in zip(xs_submit_pct, ys_elo))
-        s_xx = sum((x - x_mean) ** 2 for x in xs_submit_pct)
-        if s_xx > 0:
-            slope = s_xy / s_xx
-            intercept = y_mean - slope * x_mean
-            x_min, x_max = min(xs_submit_pct), max(xs_submit_pct)
-            ax.plot([x_min, x_max], [slope * x_min + intercept, slope * x_max + intercept], color="#2f2f2f", linewidth=2.0, linestyle="--", alpha=0.9)
+    # if len(xs_submit_pct) >= 2:
+    #     x_mean = sum(xs_submit_pct) / len(xs_submit_pct)
+    #     y_mean = sum(ys_elo) / len(ys_elo)
+    #     s_xy = sum((x - x_mean) * (y - y_mean) for x, y in zip(xs_submit_pct, ys_elo))
+    #     s_xx = sum((x - x_mean) ** 2 for x in xs_submit_pct)
+    #     if s_xx > 0:
+    #         slope = s_xy / s_xx
+    #         intercept = y_mean - slope * x_mean
+    #         x_min, x_max = min(xs_submit_pct), max(xs_submit_pct)
+    #         ax.plot([x_min, x_max], [slope * x_min + intercept, slope * x_max + intercept], color="#2f2f2f", linewidth=2.0, linestyle="--", alpha=0.9)
 
     # Annotate r
     r_text = f"Pearson r = {r:.3f}" if r is not None else "Pearson r = N/A"
@@ -334,3 +335,97 @@ def agents_correlation_elo_vs_submit(ctx: AnalysisContext) -> plt.Figure:
     fig.subplots_adjust(top=0.9, bottom=0.12, left=0.12, right=0.98)
     return fig
 
+
+@register_plot
+def agents_avg_length_vs_elo(ctx: AnalysisContext) -> plt.Figure:
+    """Scatter of ELO vs average game length (number of messages) per agent.
+
+    For each agent, compute the average number of transcript messages across
+    all matches they participated in, and plot against their ELO.
+    """
+    sns.set_theme(style="whitegrid")
+
+    with ctx.session() as session:
+        Agents = ctx.Models.Agents_
+        Matches = ctx.Models.Matches_
+        Transcripts = ctx.Models.Transcripts_
+
+        agents = session.query(Agents.id, Agents.name, Agents.elo).all()
+
+        # Map match_id -> message_count
+        counts = (
+            session.query(Transcripts.match_id, func.count(Transcripts.id))
+            .group_by(Transcripts.match_id)
+            .all()
+        )
+        match_to_len = {str(mid): int(c) for (mid, c) in counts}
+
+        # Map agent_id -> list of match_ids
+        mrows = session.query(Matches.id, Matches.agent1_id, Matches.agent2_id).all()
+        agent_to_matches: Dict[str, List[str]] = {}
+        for mid, a1, a2 in mrows:
+            mid_s = str(mid)
+            a1_s = str(a1)
+            a2_s = str(a2)
+            agent_to_matches.setdefault(a1_s, []).append(mid_s)
+            agent_to_matches.setdefault(a2_s, []).append(mid_s)
+
+    xs_avg_len: List[float] = []
+    ys_elo: List[float] = []
+    labels: List[str] = []
+
+    for agent_id, name, elo in agents:
+        aid = str(agent_id)
+        mids = agent_to_matches.get(aid, [])
+        if not mids:
+            continue
+        lengths = [match_to_len[m] for m in mids if m in match_to_len]
+        if not lengths:
+            continue
+        avg_len = sum(lengths) / len(lengths)
+        xs_avg_len.append(avg_len)
+        ys_elo.append(float(elo))
+        labels.append(name)
+
+    # Pearson correlation
+    def _pearson(x: List[float], y: List[float]) -> float | None:
+        n = len(x)
+        if n < 2:
+            return None
+        mx = sum(x) / n
+        my = sum(y) / n
+        num = sum((xi - mx) * (yi - my) for xi, yi in zip(x, y))
+        dx = (sum((xi - mx) ** 2 for xi in x)) ** 0.5
+        dy = (sum((yi - my) ** 2 for yi in y)) ** 0.5
+        if dx == 0 or dy == 0:
+            return None
+        return num / (dx * dy)
+
+    r = _pearson(xs_avg_len, ys_elo)
+
+    fig, ax = plt.subplots(figsize=(8.5, 6.0))
+    ax.scatter(xs_avg_len, ys_elo, s=28, color=sns.color_palette("colorblind")[0], alpha=0.45, edgecolor="none")
+
+    # Best-fit line
+    # if len(xs_avg_len) >= 2:
+        # mx = sum(xs_avg_len) / len(xs_avg_len)
+        # my = sum(ys_elo) / len(ys_elo)
+        # s_xy = sum((x - mx) * (y - my) for x, y in zip(xs_avg_len, ys_elo))
+        # s_xx = sum((x - mx) ** 2 for x in xs_avg_len)
+        # if s_xx > 0:
+        #     slope = s_xy / s_xx
+        #     intercept = my - slope * mx
+        #     x_min, x_max = min(xs_avg_len), max(xs_avg_len)
+        #     ax.plot([x_min, x_max], [slope * x_min + intercept, slope * x_max + intercept], color="#2f2f2f", linewidth=2.0, linestyle="--", alpha=0.9)
+
+    r_text = f"Pearson r = {r:.3f}" if r is not None else "Pearson r = N/A"
+    ax.text(0.02, 0.98, r_text, transform=ax.transAxes, ha="left", va="top", fontsize=11, bbox=dict(facecolor="white", edgecolor="#cccccc", boxstyle="round,pad=0.3"))
+
+    ax.set_xlabel("Avg messages per match", labelpad=10)
+    ax.set_ylabel("ELO", labelpad=10)
+    ax.set_title("ELO vs average game length (messages)", fontsize=13, pad=10)
+    ax.margins(x=0.05, y=0.15)
+    ax.grid(True, axis="both", linestyle=":", linewidth=0.6, alpha=0.6)
+
+    fig.subplots_adjust(top=0.9, bottom=0.12, left=0.12, right=0.98)
+    return fig
