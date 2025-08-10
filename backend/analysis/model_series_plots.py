@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Tuple
 from sqlalchemy import func
+from matplotlib.patches import Patch
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -13,7 +14,7 @@ from .registry import register_plot
 def _short_label(model_name: str) -> str:
     # Produce compact labels for report visuals
     if model_name.startswith("meta-llama/llama-3.1-") and model_name.endswith("-instruct"):
-        core = model_name.split("llama-3.1-")[-1].replace("-instruct", "").upper()
+        core = model_name.split("llama-3.1-")[-1].replace("-instruct", "").upper()[:-1]
         return core
     if model_name.startswith("meta-llama/llama-3.2-") and model_name.endswith("-instruct"):
         core = model_name.split("llama-3.2-")[-1].replace("-instruct", "").upper()
@@ -30,7 +31,7 @@ def _short_label(model_name: str) -> str:
         return core
     if model_name.startswith("anthropic/claude-"):
         core = model_name.split("claude-")[-1]
-        core = core.replace("sonnet-4", "S4").replace("opus-4", "O4")
+        core = core.replace("sonnet-4", "sonnet").replace("opus-4", "opus")
         return core
     if model_name.startswith("google/gemini-"):
         core = model_name.split("gemini-")[-1]
@@ -190,7 +191,7 @@ def model_series_elo_and_actions(ctx: AnalysisContext) -> plt.Figure:
                 continue
             rect = ax_elo.bar(x, int(elo), width=bar_width, color=colors[v_idx % len(colors)], edgecolor="#333333", linewidth=0.5)
             # Labels: variant and value
-            ax_elo.text(x, int(elo) + 6, f"{variant_labels[s_idx][v_idx]}", ha="center", va="bottom", fontsize=8, color="#444444")
+            ax_elo.text(x, int(elo) + 6, f"{variant_labels[s_idx][v_idx]}", ha="center", va="bottom", fontsize=6, color="#444444")
 
     ax_elo.set_xticks(base_x)
     ax_elo.set_xticklabels(series_names, rotation=90, ha="center", va="top")
@@ -220,6 +221,13 @@ def model_series_elo_and_actions(ctx: AnalysisContext) -> plt.Figure:
     ax_actions.set_title("Actions by model series (clustered by variant)", fontsize=12, pad=10)
     ax_actions.tick_params(axis="x", pad=8)
 
+    # Legend for action colors
+    legend_handles = [
+        Patch(facecolor=action_colors["withhold"], edgecolor="#333333", label="withhold"),
+        Patch(facecolor=action_colors["submit_evidence"], edgecolor="#333333", label="submit_evidence"),
+    ]
+    ax_actions.legend(handles=legend_handles, loc="lower right", frameon=True, title="Action")
+
     # Missing note in suptitle if any
     missing_notes = []
     for name, missing in zip(series_names, missing_by_series):
@@ -227,9 +235,9 @@ def model_series_elo_and_actions(ctx: AnalysisContext) -> plt.Figure:
             missing_notes.append(f"{name}: {len(missing)} missing")
     subtitle = "  |  ".join(missing_notes)
     if subtitle:
-        fig.suptitle(f"Model series: ELO and action distributions\n{subtitle}", fontsize=16)
+        fig.suptitle(f"Model series: ELO rating and action distributions\n{subtitle}", fontsize=16)
     else:
-        fig.suptitle("Model series: ELO and action distributions", fontsize=16)
+        fig.suptitle("Model series: ELO rating and action distributions", fontsize=16)
 
     fig.subplots_adjust(top=0.88, bottom=0.22, left=0.06, right=0.98)
     return fig
