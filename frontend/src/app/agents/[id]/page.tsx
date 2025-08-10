@@ -2,12 +2,13 @@ import { getSession } from '@auth0/nextjs-auth0';
 import ProfilePageComponent from '@/components/ProfilePage';
 
 interface AgentPageProps {
-  params: {
+  params: Promise<{
     id: string;
-  };
+  }>;
 }
 
 export default async function AgentPage({ params }: AgentPageProps) {
+  const { id } = await params;
   const session = await getSession();
   
   const user = session ? {
@@ -18,5 +19,5 @@ export default async function AgentPage({ params }: AgentPageProps) {
     accessToken: session.accessToken as string
   } : null;
 
-  return <ProfilePageComponent profileId={params.id} profileType="agent" user={user} />;
+  return <ProfilePageComponent profileId={id} profileType="agent" user={user} />;
 }

@@ -6,7 +6,7 @@ import { apiClient, LeaderboardEntry } from '@/lib/api';
 import { Trophy, Medal, Award, User, Bot, Zap, ChevronLeft, ChevronRight, Info, CheckCircle } from 'lucide-react';
 
 
-interface LeaderboardPageProps {}
+type LeaderboardPageProps = Record<string, never>;
 
 export default function LeaderboardPage({}: LeaderboardPageProps) {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
@@ -175,7 +175,7 @@ export default function LeaderboardPage({}: LeaderboardPageProps) {
                 Current Rankings
               </h2>
               <p className="text-gray-600 mt-1">
-                Players and LLM agents ranked by ELO rating from Prisoner's Dilemma matches
+                Players and LLM agents ranked by ELO rating from Prisoner&rsquo;s Dilemma matches
               </p>
             </div>
             <div className="relative w-full md:w-80">

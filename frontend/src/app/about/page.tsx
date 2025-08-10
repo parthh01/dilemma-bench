@@ -1,4 +1,3 @@
-import { Heart, ExternalLink } from "lucide-react"
 
 export default function AboutPage() {
   return (

@@ -1,7 +1,8 @@
 'use client';
 
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { apiClient, MatchmakingStatus, GameSession } from '@/lib/api';
 import { 
   Play, 
@@ -37,19 +38,7 @@ export default function GameInterface({ user }: GameInterfaceProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!user) {
-      return;
-    }
-
-    checkMatchmakingStatus();
-    
-    // Poll for updates every 2 seconds
-    const interval = setInterval(checkMatchmakingStatus, 2000); //TODO: wow, change this 
-    return () => clearInterval(interval);
-  }, [user]);
-
-  const checkMatchmakingStatus = async () => {
+  const checkMatchmakingStatus = useCallback(async () => {
     if (!user) return;
     
     const result = await apiClient.getMatchmakingStatus(user.accessToken);
@@ -66,7 +55,19 @@ export default function GameInterface({ user }: GameInterfaceProps) {
         setCurrentGame(null);
       }
     }
-  };
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    checkMatchmakingStatus();
+    
+    // Poll for updates every 2 seconds
+    const interval = setInterval(checkMatchmakingStatus, 2000);
+    return () => clearInterval(interval);
+  }, [user, checkMatchmakingStatus]);
 
   const startGameVsLLM = async () => {
     if (!user) return;
@@ -153,13 +154,13 @@ export default function GameInterface({ user }: GameInterfaceProps) {
                 No hoops to jump through, just gone.
               </p>
             </div>
-            <a
+            <Link
               href="/api/auth/login"
               className="inline-flex items-center space-x-2 bg-blue-600 text-white px-6 py-3 rounded-md hover:bg-blue-700 transition-colors"
             >
               <LogIn className="w-5 h-5" />
               <span>Login to Play</span>
-            </a>
+            </Link>
           </div>
         </div>
       </div>
@@ -175,7 +176,7 @@ export default function GameInterface({ user }: GameInterfaceProps) {
       <div className="max-w-4xl mx-auto p-6">
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="text-center mb-8">
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">Prisoner's Dilemma</h1>
+            <h1 className="text-2xl font-bold text-gray-900 mb-2">Prisoner&rsquo;s Dilemma</h1>
             <p className="text-gray-600">
               You are playing against {currentGame.player2_type === 'agent' ? 'an LLM agent' : 'another player'}
             </p>
@@ -287,7 +288,7 @@ export default function GameInterface({ user }: GameInterfaceProps) {
                   </p>
                 </div>
                  <div className="bg-white rounded-lg p-4">
-                  <p className="font-medium">Opponent's Action</p>
+                  <p className="font-medium">Opponent&rsquo;s Action</p>
                   <p className="text-lg font-bold">
                      {currentGame.player2_action === 'cooperate' ? 'Cooperate' : 'Defect'}
                   </p>
@@ -324,18 +325,18 @@ export default function GameInterface({ user }: GameInterfaceProps) {
     <div className="max-w-4xl mx-auto p-6">
       {/* Game Explanation */}
       <div className="bg-gradient-to-r from-green-50 to-blue-50 rounded-lg border border-green-200 p-6 mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 mb-3">The Prisoner's Dilemma Challenge</h1>
+        <h1 className="text-2xl font-bold text-gray-900 mb-3">The Prisoner&rsquo;s Dilemma Challenge</h1>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <h3 className="font-semibold text-gray-900 mb-2">🎮 How It Works</h3>
             <p className="text-sm text-gray-700 mb-3">
               You and an opponent must independently choose to either <strong>Cooperate</strong> or <strong>Defect</strong> 
-              without knowing the other's choice. Your payoff depends on both decisions.
+              without knowing the other&rsquo;s choice. Your payoff depends on both decisions.
             </p>
             <div className="bg-white rounded border p-3">
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div className="font-medium text-center">Your Choice → Payoff</div>
-                <div className="font-medium text-center">Opponent's Choice</div>
+                <div className="font-medium text-center">Opponent&rsquo;s Choice</div>
                 <div className="text-green-600">Both Cooperate → +3</div>
                 <div className="text-green-600">Both Cooperate → +3</div>
                 <div className="text-red-600">You Defect → +5</div>
@@ -352,7 +353,7 @@ export default function GameInterface({ user }: GameInterfaceProps) {
             <h3 className="font-semibold text-gray-900 mb-2">🧠 Research Purpose</h3>
             <p className="text-sm text-gray-700 mb-3">
               This benchmark tests strategic reasoning, cooperation tendencies, and communication skills in both 
-              AI systems and humans. Part of <a href="https://critique-labs.ai" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-700 underline">Critique AI's</a> alignment research.
+              AI systems and humans. Part of <a href="https://critique-labs.ai" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-700 underline">Critique AI&rsquo;s</a> alignment research.
             </p>
             <div className="space-y-2">
               <div className="flex items-center text-sm text-gray-600">
@@ -411,7 +412,7 @@ export default function GameInterface({ user }: GameInterfaceProps) {
               </div>
               <h3 className="text-xl font-semibold text-gray-900 mb-2">Play vs LLM</h3>
               <p className="text-gray-600 mb-6">
-                Challenge a random AI agent. Games start immediately and are blind - you won't know which model you're facing until after.
+                Challenge a random AI agent. Games start immediately and are blind - you won&rsquo;t know which model you&rsquo;re facing until after.
               </p>
               <button
                 onClick={startGameVsLLM}

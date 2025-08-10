@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
     // Handle different content types
     const contentType = request.headers.get('content-type');
     let body;
-    let headers: Record<string, string> = {
+    const headers: Record<string, string> = {
       'X-API-Key': API_KEY,
     };
     

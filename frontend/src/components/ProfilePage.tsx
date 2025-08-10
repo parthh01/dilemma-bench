@@ -30,6 +30,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { Label, Pie, PieChart, Cell } from 'recharts';
+import type { NameType, ValueType } from 'recharts/types/component/DefaultTooltipContent';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 
@@ -145,7 +146,7 @@ export default function ProfilePage({ profileId, profileType, user }: ProfilePag
   // Determine the profile player's action for a transcript
   const determinePlayerAction = (transcript: MatchTranscript): 'submit' | 'withhold' | 'default' | null => {
     if (!profile) return null;
-    const ourName = (profile as any).name as string;
+    const ourName = profile.name;
     const oppNames = new Set(matchHistory.map((m) => m.opponent_name));
     const a1 = transcript.agent1_name?.trim().toLowerCase();
     const a2 = transcript.agent2_name?.trim().toLowerCase();
@@ -183,8 +184,8 @@ export default function ProfilePage({ profileId, profileType, user }: ProfilePag
     }
 
     const sorted = [...base].sort((a, b) => {
-      let aValue: any;
-      let bValue: any;
+      let aValue: number | string;
+      let bValue: number | string;
 
       switch (sortField) {
         case 'date':
@@ -421,6 +422,7 @@ export default function ProfilePage({ profileId, profileType, user }: ProfilePag
           </CardHeader>
           <CardContent className="flex-1 pb-0">
             {(() => {
+              type ResultFilterKey = 'wins' | 'losses' | 'draws';
               const total = profile.total_matches || 0;
               const wins = profile.wins || 0;
               // Derive losses from total and wins and draws from result=0 in history later
@@ -428,7 +430,7 @@ export default function ProfilePage({ profileId, profileType, user }: ProfilePag
               const draws = matchHistory.filter(m => m.result === 0).length;
               const losses = Math.max(total - wins - draws, 0);
 
-              const chartData = [
+              const chartData: Array<{ key: ResultFilterKey; label: string; value: number; fill: string; total: number }> = [
                 { key: 'wins', label: 'Wins', value: wins, fill: 'var(--color-wins)', total },
                 { key: 'losses', label: 'Losses ', value: losses, fill: 'var(--color-losses)', total },
                 { key: 'draws', label: 'Draws ', value: draws, fill: 'var(--color-draws)', total },
@@ -449,14 +451,18 @@ export default function ProfilePage({ profileId, profileType, user }: ProfilePag
                       content={
                         <ChartTooltipContent
                           hideLabel
-                          formatter={(value, name, item: any) => {
+                          formatter={(value: ValueType, name: NameType, item: { payload?: { total?: number } }) => {
                             const totalV = item?.payload?.total ?? 0;
-                            const pct = totalV ? ((value as number) / totalV) * 100 : 0;
+                            let numericValue = 0;
+                            if (typeof value === 'number') numericValue = value;
+                            else if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'number') numericValue = value[0] as number;
+                            else if (typeof value === 'string') numericValue = Number(value);
+                            const pct = totalV ? (numericValue / totalV) * 100 : 0;
                             return (
                               <div className="flex w-full justify-between">
                                 <span className="text-muted-foreground">{name}</span>
                                 <span className="text-foreground font-mono font-medium tabular-nums">
-                                  {(value as number).toLocaleString()} ({pct.toFixed(1)}%)
+                                  {numericValue.toLocaleString()} ({pct.toFixed(1)}%)
                                 </span>
                               </div>
                             );
@@ -470,10 +476,10 @@ export default function ProfilePage({ profileId, profileType, user }: ProfilePag
                           key={entry.key}
                           fill={entry.fill as string}
                           onClick={() =>
-                            setResultFilter((prev) => (prev === entry.key ? null : (entry.key as 'wins' | 'losses' | 'draws')))
+                            setResultFilter((prev) => (prev === entry.key ? null : entry.key))
                           }
                           style={{ cursor: 'pointer' }}
-                          opacity={resultFilter && resultFilter !== (entry.key as any) ? 0.4 : 1}
+                          opacity={resultFilter && resultFilter !== entry.key ? 0.4 : 1}
                         />
                       ))}
                       <Label
@@ -513,17 +519,18 @@ export default function ProfilePage({ profileId, profileType, user }: ProfilePag
           </CardHeader>
           <CardContent className="flex-1 pb-0">
             {(() => {
-              const submitCount = (profile as any).action_counts?.submit_evidence ?? 0;
-              const withholdRaw = (profile as any).action_counts?.withhold ?? 0;
-              const defaultCount = (profile as any).defaults ?? 0;
+              type ActionFilterKey = 'submit' | 'withhold' | 'default';
+               const submitCount = profile.action_counts?.submit_evidence ?? 0;
+               const withholdRaw = profile.action_counts?.withhold ?? 0;
+               const defaultCount = profile.defaults ?? 0;
               const withholdCount = Math.max(withholdRaw - defaultCount, 0);
               const total = submitCount + withholdCount + defaultCount;
 
-              const chartData = [
+               const chartData: Array<{ key: ActionFilterKey; label: string; value: number; fill: string; total: number }> = [
                 { key: 'submit', label: 'submit_evidence ', value: submitCount, fill: 'var(--color-submit)', total },
                 { key: 'withhold', label: 'withhold ', value: withholdCount, fill: 'var(--color-withhold)', total },
                 { key: 'default', label: 'default (→ withhold) ', value: defaultCount, fill: 'var(--color-default)', total },
-              ];
+               ];
 
               const chartConfig: ChartConfig = {
                 value: { label: 'Actions' },
@@ -540,14 +547,18 @@ export default function ProfilePage({ profileId, profileType, user }: ProfilePag
                       content={
                         <ChartTooltipContent
                           hideLabel
-                          formatter={(value, name, item: any) => {
+                          formatter={(value: ValueType, name: NameType, item: { payload?: { total?: number } }) => {
                             const totalV = item?.payload?.total ?? 0;
-                            const pct = totalV ? ((value as number) / totalV) * 100 : 0;
+                            let numericValue = 0;
+                            if (typeof value === 'number') numericValue = value;
+                            else if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'number') numericValue = value[0] as number;
+                            else if (typeof value === 'string') numericValue = Number(value);
+                            const pct = totalV ? (numericValue / totalV) * 100 : 0;
                             return (
                               <div className="flex w-full justify-between">
                                 <span className="text-muted-foreground">{name} </span>
                                 <span className="text-foreground font-mono font-medium tabular-nums">
-                                  {(value as number).toLocaleString()} ({pct.toFixed(1)}%)
+                                  {numericValue.toLocaleString()} ({pct.toFixed(1)}%)
                                 </span>
                               </div>
                             );
@@ -561,10 +572,10 @@ export default function ProfilePage({ profileId, profileType, user }: ProfilePag
                           key={entry.key}
                           fill={entry.fill as string}
                           onClick={() =>
-                            setActionFilter((prev) => (prev === entry.key ? null : (entry.key as 'submit' | 'withhold' | 'default')))
+                            setActionFilter((prev) => (prev === entry.key ? null : entry.key))
                           }
                           style={{ cursor: 'pointer' }}
-                          opacity={actionFilter && actionFilter !== (entry.key as any) ? 0.4 : 1}
+                          opacity={actionFilter && actionFilter !== entry.key ? 0.4 : 1}
                         />
                       ))}
                       <Label
@@ -729,23 +740,37 @@ export default function ProfilePage({ profileId, profileType, user }: ProfilePag
                     </div>
                     
                     <div className="col-span-5">
-                      <div className="flex items-center space-x-2">
-                        {match.opponent_type === 'user' ? (
-                          <User className="w-4 h-4 text-blue-500 flex-shrink-0" />
-                        ) : (
-                          <Bot className="w-4 h-4 text-green-500 flex-shrink-0" />
-                        )}
-                        <span className="font-medium text-gray-900 truncate">
-                          {match.opponent_name}
-                        </span>
-                        <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
-                          match.opponent_type === 'user' 
-                            ? 'bg-blue-100 text-blue-700' 
-                            : 'bg-green-100 text-green-700'
-                        }`}>
-                          {match.opponent_type === 'user' ? 'User' : 'LLM'}
-                        </span>
-                      </div>
+                      {(() => {
+                        const opponentHref =
+                          match.opponent_type === 'agent'
+                            ? `/agents/${match.opponent_id}`
+                            : `/users/${match.opponent_id}`;
+                        return (
+                          <Link
+                            href={opponentHref}
+                            className="flex items-center space-x-2 group"
+                            aria-label={`View ${match.opponent_type === 'agent' ? 'agent' : 'user'} profile`}
+                          >
+                            {match.opponent_type === 'user' ? (
+                              <User className="w-4 h-4 text-blue-500 flex-shrink-0" />
+                            ) : (
+                              <Bot className="w-4 h-4 text-green-500 flex-shrink-0" />
+                            )}
+                            <span className="font-medium truncate text-blue-700 group-hover:underline">
+                              {match.opponent_name}
+                            </span>
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                                match.opponent_type === 'user'
+                                  ? 'bg-blue-100 text-blue-700'
+                                  : 'bg-green-100 text-green-700'
+                              }`}
+                            >
+                              {match.opponent_type === 'user' ? 'User' : 'LLM'}
+                            </span>
+                          </Link>
+                        );
+                      })()}
                     </div>
                     
                     <div className="col-span-3">
