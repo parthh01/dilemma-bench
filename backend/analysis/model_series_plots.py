@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Dict, List, Tuple
 from sqlalchemy import func
 from matplotlib.patches import Patch
+import matplotlib.patheffects as pe
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -14,7 +15,7 @@ from .registry import register_plot
 def _short_label(model_name: str) -> str:
     # Produce compact labels for report visuals
     if model_name.startswith("meta-llama/llama-3.1-") and model_name.endswith("-instruct"):
-        core = model_name.split("llama-3.1-")[-1].replace("-instruct", "").upper()[:-1]
+        core = model_name.split("llama-3.1-")[-1].replace("-instruct", "").upper()
         return core
     if model_name.startswith("meta-llama/llama-3.2-") and model_name.endswith("-instruct"):
         core = model_name.split("llama-3.2-")[-1].replace("-instruct", "").upper()
@@ -177,27 +178,58 @@ def model_series_elo_and_actions(ctx: AnalysisContext) -> plt.Figure:
     # Clustered ELO bars
     max_variants = max(len(v) for v in elo_values)
     base_x = list(range(len(series_names)))
-    bar_width = 0.18
-    cluster_width = max_variants * bar_width + (max_variants - 1) * 0.04
+    bar_width = 0.22
+    intra_gap = 0.12
+    cluster_width = max_variants * bar_width + (max_variants - 1) * intra_gap
     start_offset = -cluster_width / 2 + bar_width / 2
 
     colors = [sns.color_palette("colorblind")[0], sns.color_palette("colorblind")[1], sns.color_palette("colorblind")[2]]
 
+    # Determine a global top limit to leave headroom for variant labels
+    all_elos_flat = [int(e) for series in elo_values for e in series if e is not None]
+    max_elo_plot = max(all_elos_flat) if all_elos_flat else 1000
+
     for s_idx, series_elos in enumerate(elo_values):
         n = len(series_elos)
         for v_idx, elo in enumerate(series_elos):
-            x = base_x[s_idx] + start_offset + v_idx * (bar_width + 0.04)
+            x = base_x[s_idx] + start_offset + v_idx * (bar_width + intra_gap)
             if elo is None:
                 continue
-            rect = ax_elo.bar(x, int(elo), width=bar_width, color=colors[v_idx % len(colors)], edgecolor="#333333", linewidth=0.5)
-            # Labels: variant and value
-            ax_elo.text(x, int(elo) + 6, f"{variant_labels[s_idx][v_idx]}", ha="center", va="bottom", fontsize=6, color="#444444")
+            ax_elo.bar(x, int(elo), width=bar_width, color=colors[v_idx % len(colors)], edgecolor="#333333", linewidth=0.5)
+            # Numeric ELO label inside the bar for readability
+            text_y = int(elo) - 12
+            y_min, y_max = ax_elo.get_ylim()
+            if text_y < y_min + 10:
+                text_y = int(elo) + 6
+            # ax_elo.text(
+            #     x,
+            #     text_y,
+            #     f"{int(elo)}",
+            #     ha="center",
+            #     va="bottom",
+            #     fontsize=10,
+            #     color="white" if text_y <= int(elo) else "#222222",
+            #     fontweight="bold",
+            #     path_effects=[pe.withStroke(linewidth=1.5, foreground="#000000" if text_y <= int(elo) else "#ffffff")],
+            # )
+            # Variant label just above the bar to ensure visibility
+            ax_elo.text(
+                x,
+                int(elo) + 10,
+                variant_labels[s_idx][v_idx],
+                ha="center",
+                va="bottom",
+                rotation=90,
+                fontsize=9,
+                color="#333333",
+                clip_on=False,
+            )
 
     ax_elo.set_xticks(base_x)
     ax_elo.set_xticklabels(series_names, rotation=90, ha="center", va="top")
     ax_elo.set_ylabel("ELO", labelpad=10)
     ax_elo.set_title("ELO by model series (clustered by variant)", fontsize=12, pad=10)
-    ax_elo.set_ylim(bottom=950)
+    ax_elo.set_ylim(bottom=950, top=max_elo_plot + 90)
     ax_elo.margins(y=0.2)
     ax_elo.tick_params(axis="x", pad=8)
 
@@ -206,7 +238,7 @@ def model_series_elo_and_actions(ctx: AnalysisContext) -> plt.Figure:
     for s_idx in range(len(series_names)):
         n = len(action_withhold[s_idx])
         for v_idx in range(n):
-            x = base_x[s_idx] + start_offset + v_idx * (bar_width + 0.04)
+            x = base_x[s_idx] + start_offset + v_idx * (bar_width + intra_gap)
             w = action_withhold[s_idx][v_idx]
             u = action_submit[s_idx][v_idx]
             ax_actions.bar(x, w, width=bar_width, color=action_colors["withhold"], edgecolor="#333333", linewidth=0.4)
