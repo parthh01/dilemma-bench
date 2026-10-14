@@ -3,6 +3,39 @@ import { NextRequest, NextResponse } from 'next/server';
 const BACKEND_URL = process.env.BACKEND_URL;
 const API_KEY = process.env.BACKEND_UI_SECRET;
 
+function resolveBackendEndpoint(endpoint: string): string | null {
+  // The endpoint is a path beneath the configured backend, never a hostname or URL.
+  if (!endpoint.startsWith('/') || /[\\#\u0000-\u001f\u007f]/.test(endpoint)) {
+    return null;
+  }
+  const path = endpoint.split('?')[0];
+  let decodedPath: string;
+  try {
+    decodedPath = decodeURIComponent(path);
+    if (/[\\#\u0000-\u001f\u007f]/.test(decodeURIComponent(endpoint))) return null;
+  } catch {
+    return null;
+  }
+  // Reject ambiguous separators and traversal before URL or upstream normalization.
+  if (decodedPath.includes('//') || /%(?:2f|5c|25)/i.test(path)
+      || decodedPath.split('/').some(segment => segment === '.' || segment === '..')) {
+    return null;
+  }
+
+  const backend = new URL(BACKEND_URL!);
+  if (!['http:', 'https:'].includes(backend.protocol) || backend.username || backend.password
+      || backend.search || backend.hash) {
+    throw new Error('Invalid backend URL configuration');
+  }
+  const basePath = backend.pathname.replace(/\/+$/, '');
+  backend.pathname = `${basePath}/`;
+  const destination = new URL(endpoint.slice(1), backend);
+  if (destination.origin !== backend.origin || !destination.pathname.startsWith(`${basePath}/`)) {
+    return null;
+  }
+  return destination.toString();
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const endpoint = searchParams.get('endpoint');
@@ -20,7 +53,10 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const backendUrl = `${BACKEND_URL}${endpoint}`;
+    const backendUrl = resolveBackendEndpoint(endpoint);
+    if (!backendUrl) {
+      return NextResponse.json({ error: 'Invalid endpoint path' }, { status: 400 });
+    }
     
     // Check for user authentication in headers
     const authHeader = request.headers.get('authorization');
@@ -38,6 +74,7 @@ export async function GET(request: NextRequest) {
     const response = await fetch(backendUrl, {
       method: 'GET',
       headers,
+      redirect: 'error',
     });
 
     if (!response.ok) {
@@ -75,7 +112,10 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const backendUrl = `${BACKEND_URL}${endpoint}`;
+    const backendUrl = resolveBackendEndpoint(endpoint);
+    if (!backendUrl) {
+      return NextResponse.json({ error: 'Invalid endpoint path' }, { status: 400 });
+    }
     
     // Check for user authentication in headers
     const authHeader = request.headers.get('authorization');
@@ -111,6 +151,7 @@ export async function POST(request: NextRequest) {
       method: 'POST',
       headers,
       body,
+      redirect: 'error',
     });
 
     if (!response.ok) {

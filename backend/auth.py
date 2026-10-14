@@ -7,6 +7,7 @@ from fastapi import  Depends ,WebSocket, WebSocketException, status, HTTPExcepti
 from db.definition import create_update_user
 from typing import Optional
 import os
+from secrets import compare_digest
 from contextvars import ContextVar
 from dotenv import load_dotenv
 load_dotenv()
@@ -42,17 +43,25 @@ class UnauthenticatedException(HTTPException):
         )
 
 
-def ui_client_validation(request: Request):
-    if request.headers.get("X-API-Key") == os.getenv("UI_CLIENT_SECRET"):
-        return True
-    else:
+def _validate_client_secret(request: Request, environment_name: str):
+    expected = os.getenv(environment_name)
+    supplied = request.headers.get("X-API-Key")
+    if (
+        not expected
+        or not expected.strip()
+        or not supplied
+        or not supplied.strip()
+        or not compare_digest(expected.encode("utf-8"), supplied.encode("utf-8"))
+    ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    return True
+
+
+def ui_client_validation(request: Request):
+    return _validate_client_secret(request, "UI_CLIENT_SECRET")
 
 def mcp_client_validation(request: Request):
-    if request.headers.get("X-API-Key") == os.getenv("MCP_SECRET_API_KEY"):
-        return True
-    else:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    return _validate_client_secret(request, "MCP_SECRET_API_KEY")
 
 class VerifyToken:
     """Does all the token verification using PyJWT"""
@@ -93,7 +102,5 @@ class VerifyToken:
                 raise UnauthorizedException(str(error))
         
             #create or update user in db
-            print(payload)
-
             create_update_user(payload['sub'])
             return payload
