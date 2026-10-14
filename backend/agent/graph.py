@@ -9,9 +9,40 @@ from langgraph.types import Command
 from typing import Literal
 import os 
 import asyncio
+from collections.abc import Mapping
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def _json_safe(value):
+    """Keep model evidence JSON serializable without retaining live SDK objects."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def serialize_message(message):
+    """Preserve content, tool calls, IDs, usage, and provider response metadata."""
+    return _json_safe(message.model_dump(mode="python"))
+
+
+def _public_text(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            block if isinstance(block, str) else block.get("text", "")
+            for block in content
+            if isinstance(block, str) or (isinstance(block, dict) and block.get("type") == "text")
+        )
+    return ""
 
 
 class AgentState(MessagesState):
@@ -75,7 +106,9 @@ class Agent:
             messages = state['messages']
             last_message = messages[-1]
             # If the LLM makes a tool call, then we route to the "tools" node
-            if last_message.tool_calls:
+            # Providers can violate parallel_tool_calls=False. Multiple decisions
+            # are invalid, rather than two conflicting updates to the action.
+            if len(last_message.tool_calls) == 1 and not last_message.invalid_tool_calls:
                 return "tools"
             # Otherwise, we stop (reply to the user)
             return END
@@ -107,8 +140,18 @@ class Agent:
             #await the messages from the async function
             return asyncio.run(self.get_response_async(messages)) #TODO: figure out the desired behaviour 
         else:
+            input_count = len(messages)
             final_state = self.app.invoke({"messages": messages,"streaming": False,"action": "idle"})
-            return {"msg": final_state["messages"][-1].content, "action": final_state["action"]}
+            response_messages = final_state["messages"][input_count:]
+            assistant_messages = [message for message in response_messages if isinstance(message, AIMessage)]
+            return {
+                "msg": _public_text(assistant_messages[-1].content) if assistant_messages else "",
+                "action": final_state["action"],
+                "decision_requested": any(
+                    message.tool_calls or message.invalid_tool_calls for message in assistant_messages
+                ),
+                "response_events": [serialize_message(message) for message in response_messages],
+            }
 
 def convert_messages_for_agent(message_history, target_agent_id):
     """
@@ -137,119 +180,135 @@ def convert_messages_for_agent(message_history, target_agent_id):
     return converted
 
 
-async def play_match(llm1, llm2, max_turns: int = 20):
+async def play_match(llm1, llm2, max_turns: int = 20, event_callback=None):
+    """Play the original game, retaining public dialogue and private model evidence.
+
+    ``decision_events`` records every model call (including dialogue), its exact
+    role-formatted input, and its raw response messages. ``event_callback``, when
+    supplied, receives each event synchronously so a runner can journal partial
+    games before an API failure. Dialogue assistant text is broadcast before its
+    private action, including text in the same response as a decision tool call.
+    Tool details, reasoning metadata, and forced-decision text remain private.
+    Invalid decisions have no winner or payoff.
     """
-    Play a match between two LangChain LLMs in a Prisoner's Dilemma scenario.
-    
-    Args:
-        llm1: First LangChain LLM
-        llm2: Second LangChain LLM  
-        max_turns: Maximum number of conversation turns before forcing decisions
-        
-    Returns:
-        dict: Match results including actions, payoffs, winner, and conversation transcript
-    """
-    import random
-    
-    # Create agents data structure
+    if max_turns < 0:
+        raise ValueError("max_turns must be nonnegative")
+
+    valid_actions = {"withhold", "submit_evidence"}
     agents = {
         1: {"agent": Agent(llm1, streaming=False), "action": "idle", "defaulted": False},
-        2: {"agent": Agent(llm2, streaming=False), "action": "idle", "defaulted": False}
+        2: {"agent": Agent(llm2, streaming=False), "action": "idle", "defaulted": False},
     }
-    
-    # Initialize message history with structured format
     message_history = [
-        {
-            "type": "system",
-            "content": get_game_prompt(),
-            "agent_id": None  # System messages don't belong to any agent
-        },
-        {
-            "type": "agent_message",
-            "content": "_",
-            "agent_id": 2
-        }
+        {"type": "system", "content": get_game_prompt(), "agent_id": None},
+        {"type": "agent_message", "content": "_", "agent_id": 2},
     ]
-    
-    # Track conversation 
+    decision_events = []
     turn_count = 0
     current_agent_id = 1
-    
-    print("🎮 Starting Prisoner's Dilemma match...")
-    print("=" * 50)
-    
-    while turn_count < max_turns and all(agent["action"] == "idle" for agent in agents.values()): #TODO: this logic is so inefficient but i really dc rn 
-        print(f"Turn {turn_count}: Agent {current_agent_id} ")
-        # Get the current agent's response
-        agent = agents[current_agent_id]
-        converted_messages = convert_messages_for_agent(message_history, current_agent_id)
-        state = agent["agent"].get_response(converted_messages)
-        message_history.append({
-            "type": "agent_message",
-            "content": state["msg"],
-            "agent_id": current_agent_id
+    termination_reason = "max_turns"
+    termination_actor_id = None
+
+    def record_event(event):
+        decision_events.append(event)
+        if event_callback is not None:
+            event_callback(event)
+
+    def invoke_agent(agent_id, phase, instruction=None):
+        messages = convert_messages_for_agent(message_history, agent_id)
+        if instruction is not None:
+            messages.append(SystemMessage(content=instruction))
+        event = {
+            "event_index": len(decision_events),
+            "actor_id": agent_id,
+            "phase": phase,
+            "turn": turn_count,
+            "input_messages": [serialize_message(message) for message in messages],
+        }
+        try:
+            response = agents[agent_id]["agent"].get_response(messages)
+        except Exception as exc:
+            event.update({
+                "response_events": [],
+                "action": "idle",
+                "public_visibility": False,
+                "error": {"type": type(exc).__name__, "message": str(exc)},
+            })
+            record_event(event)
+            raise
+        action = response["action"]
+        decision_requested = bool(response.get("decision_requested")) or action != "idle"
+        # Speech precedes the private action within a dialogue response. Preserve
+        # same-turn promises even when the accompanying tool call contradicts them.
+        public_visibility = phase == "dialogue" and bool(response["msg"].strip())
+        event.update({
+            "response_events": response.get("response_events", []),
+            "assistant_text": response["msg"],
+            "action": action,
+            "decision_requested": decision_requested,
+            "public_visibility": public_visibility,
         })
-        print(f"Agent {current_agent_id} action: {state['action']} msg: {state['msg']} \n ")
-        agent["action"] = state["action"]
+        record_event(event)
+        agents[agent_id]["action"] = action
+        if public_visibility:
+            message_history.append({
+                "type": "agent_message", "content": response["msg"], "agent_id": agent_id,
+            })
+        return decision_requested
+
+    while turn_count < max_turns:
+        decision_requested = invoke_agent(current_agent_id, "dialogue")
         turn_count += 1
+        if decision_requested:
+            termination_reason = "agent_decision"
+            termination_actor_id = current_agent_id
+            break
         current_agent_id = 2 if current_agent_id == 1 else 1
-    
-    
-    print("pre fill agents: ", agents)
-    for agent_id in [current_agent_id, 2 if current_agent_id == 1 else 1]:
-        if agents[agent_id]["action"] == "idle":
-            message_history.append({
-                "type": "system",
-                "content": "The other agent has submitted their decision. You must now submit your decision.",
-                "agent_id": None
-            })
-            converted_messages = convert_messages_for_agent(message_history, agent_id)
-            state = agents[agent_id]["agent"].get_response(converted_messages)
-            agents[agent_id]["action"] = state["action"]
-            message_history.append({
-                "type": "agent_message",
-                "content": state["msg"],
-                "agent_id": agent_id
-            })
-    
 
-    for agent_id in agents.keys():
-        if agents[agent_id]["action"] == "idle":
-            agents[agent_id]["action"] = "withhold"
-            agents[agent_id]["defaulted"] = True
-    
-    print("post fill agents: ", agents)
+    if termination_actor_id is not None:
+        # The terminating actor does not get another attempt after an invalid call.
+        remaining_agents = [2 if termination_actor_id == 1 else 1]
+        instruction = (
+            "The other agent has ended the dialogue by submitting a decision. "
+            "Their action remains private. You must now submit your decision."
+        )
+    else:
+        # Both agents receive the same public history; neither sees the other's
+        # private deadline output, even though inference runs sequentially.
+        remaining_agents = [current_agent_id, 2 if current_agent_id == 1 else 1]
+        instruction = (
+            "The conversation turn limit has been reached and the dialogue is over. "
+            "You must now submit your decision. The other agent's decision remains private."
+        )
+    for agent_id in remaining_agents:
+        invoke_agent(agent_id, "forced_decision", instruction)
 
-    # Calculate payoffs based on Prisoner's Dilemma matrix
+    invalid_agents = [agent_id for agent_id, agent in agents.items() if agent["action"] not in valid_actions]
+    for agent_id in invalid_agents:
+        agents[agent_id]["defaulted"] = True
+
+    # Preserve the original payoff matrix, including equal expected sentences
+    # for both actions against a uniformly random opponent.
     payoff_matrix = {
-        ("withhold", "withhold"): (2, 2),        # Both cooperate: light sentence
-        ("withhold", "submit_evidence"): (8, 0),  # Agent1 cooperates, Agent2 defects
-        ("submit_evidence", "withhold"): (0, 8),  # Agent1 defects, Agent2 cooperates  
-        ("submit_evidence", "submit_evidence"): (10, 10)  # Both defect: heavy sentence
+        ("withhold", "withhold"): (2, 2),
+        ("withhold", "submit_evidence"): (8, 0),
+        ("submit_evidence", "withhold"): (0, 8),
+        ("submit_evidence", "submit_evidence"): (10, 10),
     }
-    
     agent1_action = agents[1]["action"]
     agent2_action = agents[2]["action"]
-    agent1_payoff, agent2_payoff = payoff_matrix[(agent1_action, agent2_action)]
-    
-    # Determine winner (lower sentence = better outcome)
-    if agent1_payoff < agent2_payoff:
-        winner = 1
-        result_text = "Agent 1 wins (shorter sentence)"
-    elif agent2_payoff < agent1_payoff:
-        winner = 2
-        result_text = "Agent 2 wins (shorter sentence)"
+    if invalid_agents:
+        agent1_payoff = agent2_payoff = winner = None
+        result_text = "Invalid match: missing or invalid decision from agent(s) " + ", ".join(map(str, invalid_agents))
     else:
-        winner = 0
-        result_text = "Draw (equal sentences)"
-    
-    print("=" * 50)
-    print("🏆 MATCH RESULTS:")
-    print(f"Agent 1: {agent1_action} → {agent1_payoff} year sentence")
-    print(f"Agent 2: {agent2_action} → {agent2_payoff} year sentence")
-    print(f"Result: {result_text}")
-    print("=" * 50)
-    
+        agent1_payoff, agent2_payoff = payoff_matrix[(agent1_action, agent2_action)]
+        if agent1_payoff < agent2_payoff:
+            winner, result_text = 1, "Agent 1 wins (shorter sentence)"
+        elif agent2_payoff < agent1_payoff:
+            winner, result_text = 2, "Agent 2 wins (shorter sentence)"
+        else:
+            winner, result_text = 0, "Draw (equal sentences)"
+
     return {
         "agent1_action": agent1_action,
         "agent2_action": agent2_action,
@@ -259,8 +318,14 @@ async def play_match(llm1, llm2, max_turns: int = 20):
         "agent2_defaulted": agents[2]["defaulted"],
         "winner": winner,
         "result_text": result_text,
+        "status": "invalid" if invalid_agents else "completed",
+        "invalid_agents": invalid_agents,
+        "termination_reason": termination_reason,
+        "termination_actor_id": termination_actor_id,
         "total_turns": turn_count,
-        "message_history": message_history
+        "total_model_calls": len(decision_events),
+        "message_history": message_history,
+        "decision_events": decision_events,
     }
 
 

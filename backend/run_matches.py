@@ -25,6 +25,8 @@ from dotenv import load_dotenv
 import os
 import requests
 import textwrap
+import json
+from pathlib import Path
 # Import from our modules
 from agent.graph import play_match
 from db.definition import (
@@ -81,11 +83,34 @@ def get_models() -> List[Dict]:
 
 
 class MatchRunner:
-    def __init__(self, max_workers: int = 4):
+    def __init__(self, max_workers: int = 4, invalid_results_path=None):
         self.max_workers = max_workers
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
         self.active_matches = 0
         self.lock = threading.Lock()
+        self.invalid_results_path = Path(invalid_results_path) if invalid_results_path else Path(__file__).resolve().parent / "research_data" / "legacy-runner-invalid.jsonl"
+        self.invalid_pairs = set()
+        if self.invalid_results_path.exists():
+            with self.invalid_results_path.open() as journal:
+                for line in journal:
+                    record = json.loads(line)
+                    self.invalid_pairs.add(tuple(sorted((record["agent1_id"], record["agent2_id"]))))
+
+    def store_invalid_result(self, agent1_id, agent2_id, match_result):
+        """Persist terminal invalid outcomes without inserting a draw or changing Elo."""
+        if match_result.get("status") != "invalid" and match_result.get("winner") is not None:
+            return False
+        record = {**match_result, "status": "invalid", "agent1_id": agent1_id, "agent2_id": agent2_id,
+                  "recorded_at": datetime.now().isoformat()}
+        with self.lock:
+            self.invalid_results_path.parent.mkdir(parents=True, exist_ok=True)
+            with self.invalid_results_path.open("a") as journal:
+                journal.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+                journal.flush()
+                os.fsync(journal.fileno())
+            self.invalid_pairs.add(tuple(sorted((agent1_id, agent2_id))))
+        logger.warning("Invalid match recorded without Elo update: %s vs %s", agent1_id, agent2_id)
+        return True
     
     def find_unplayed_pairs(self, models: List[Dict]) -> List[Tuple[Dict, Dict, str, str]]:
         """Find pairs of models that haven't played each other yet, optimized to avoid provider conflicts"""
@@ -106,7 +131,7 @@ class MatchRunner:
                 agent1_id = model_to_agent_id[model1["id"]]
                 agent2_id = model_to_agent_id[model2["id"]]
                 
-                if (agent1_id, agent2_id) not in played_pairs and (agent2_id, agent1_id) not in played_pairs:
+                if (agent1_id, agent2_id) not in played_pairs and (agent2_id, agent1_id) not in played_pairs and tuple(sorted((agent1_id, agent2_id))) not in self.invalid_pairs:
                     all_unplayed_pairs.append((model1, model2, agent1_id, agent2_id))
         
         # Now sort pairs to minimize provider conflicts
@@ -273,6 +298,10 @@ class MatchRunner:
             finally:
                 loop.close()
             
+            if self.store_invalid_result(agent1_id, agent2_id, match_result):
+                with self.lock:
+                    self.active_matches -= 1
+                return True
             # Store results
             elo_changes = store_match_result(agent1_id, agent2_id, match_result)
             
@@ -314,6 +343,10 @@ class MatchRunner:
             # Run the match (async)
             match_result = await play_match(llm1, llm2, max_turns=20)
             
+            if self.store_invalid_result(agent1_id, agent2_id, match_result):
+                with self.lock:
+                    self.active_matches -= 1
+                return True
             # Store results
             elo_changes = store_match_result(agent1_id, agent2_id, match_result)
             

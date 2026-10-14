@@ -4,3 +4,5 @@
 **/*.pyc
 frontend/cache
 backend/analysis/output
+backend/research_data/
+**/__pycache__/
